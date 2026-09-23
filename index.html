@@ -1,0 +1,1419 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no"
+    />
+    <title>Township – Playable Demo</title>
+    <style>
+      :root {
+        color-scheme: light;
+      }
+      * {
+        box-sizing: border-box;
+        -webkit-tap-highlight-color: transparent;
+        user-select: none;
+        -webkit-user-select: none;
+      }
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        width: 100%;
+        overflow: hidden;
+        background: #0d0d0d;
+        font-family:
+          -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+      }
+      #app {
+        position: fixed;
+        inset: 0;
+        max-width: 480px;
+        margin: 0 auto;
+        box-shadow: 0 0 40px rgba(0, 0, 0, 0.5);
+        overflow: hidden;
+      }
+      canvas {
+        display: block;
+        width: 100%;
+        height: 100%;
+        touch-action: none;
+      }
+      #hud {
+        position: absolute;
+        top: calc(env(safe-area-inset-top, 0px) + 10px);
+        left: 0;
+        right: 0;
+        display: flex;
+        gap: 8px;
+        padding: 0 12px;
+        flex-wrap: wrap;
+        pointer-events: none;
+      }
+      .pill {
+        background: rgba(255, 255, 255, 0.94);
+        color: #2b2b2b;
+        padding: 6px 11px;
+        border-radius: 20px;
+        font-size: 13px;
+        font-weight: 700;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+      }
+      #joyBase {
+        position: absolute;
+        width: 104px;
+        height: 104px;
+        border-radius: 50%;
+        background: rgba(255, 255, 255, 0.22);
+        border: 2px solid rgba(255, 255, 255, 0.55);
+        left: 20px;
+        bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+        touch-action: none;
+        z-index: 5;
+      }
+      #joyStick {
+        position: absolute;
+        width: 46px;
+        height: 46px;
+        border-radius: 50%;
+        background: rgba(255, 255, 255, 0.9);
+        left: 50%;
+        top: 50%;
+        transform: translate(-50%, -50%);
+        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+        pointer-events: none;
+      }
+      #complete {
+        position: absolute;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.8);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        flex-direction: column;
+        color: #fff;
+        text-align: center;
+        padding: 24px;
+      }
+      #complete.show {
+        display: flex;
+      }
+      #complete h1 {
+        font-size: 44px;
+        margin: 0 0 10px;
+        font-weight: 900;
+        letter-spacing: 1px;
+        color: #ffde59;
+        text-shadow:
+          0 3px 0 #cc3f34,
+          0 8px 16px rgba(0, 0, 0, 0.4);
+      }
+      #complete p {
+        font-size: 14px;
+        opacity: 0.85;
+        margin: 0 0 22px;
+        max-width: 280px;
+        line-height: 1.5;
+      }
+      #complete button {
+        background: #b5652e;
+        border: none;
+        padding: 13px 26px;
+        border-radius: 22px;
+        font-size: 15px;
+        font-weight: 800;
+        color: white;
+        margin-top: 20px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <canvas id="game"></canvas>
+      <div id="hud"></div>
+      <div id="joyBase"><div id="joyStick"></div></div>
+      <div id="complete">
+        <h1>Township</h1>
+        <button onclick="location.reload()">Keep Playing</button>
+      </div>
+    </div>
+
+    <script>
+      const SPRITE_NAMES = [
+        "farmer",
+        "helper",
+        "combine",
+        "seller",
+        "baker",
+        "cowfeeder",
+        "milkmaid",
+        "wheat_ripe",
+        "wheat_sprout",
+        "stone",
+        "wood",
+        "bread",
+        "oven",
+        "warehouse",
+        "pen",
+        "cow_hungry",
+        "cow_fed",
+        "milk_bottle",
+        "hourglass",
+        "forest",
+        "barn",
+        "helicopter",
+        "crate",
+        "kassa",
+      ];
+    </script>
+    <script>
+      const canvas = document.getElementById("game");
+      const ctx = canvas.getContext("2d");
+      let W, H, DPR;
+      const appEl = document.getElementById("app");
+      function resize() {
+        DPR = Math.min(window.devicePixelRatio || 1, 2);
+        const rect = appEl.getBoundingClientRect();
+        W = rect.width;
+        H = rect.height;
+        canvas.width = W * DPR;
+        canvas.height = H * DPR;
+        ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+      }
+      window.addEventListener("resize", resize);
+      resize();
+
+      const SPRITES = {};
+      for (const k of SPRITE_NAMES) {
+        const im = new Image();
+        im.src = "sprites/" + k + ".png";
+        SPRITES[k] = im;
+      }
+      function drawSprite(name, cx, cy, h, alpha) {
+        const im = SPRITES[name];
+        if (!im || !im.complete || !im.naturalWidth) return false;
+        const w = h * (im.naturalWidth / im.naturalHeight);
+        if (alpha !== undefined) {
+          ctx.globalAlpha = alpha;
+        }
+        ctx.drawImage(im, cx - w / 2, cy - h / 2, w, h);
+        if (alpha !== undefined) {
+          ctx.globalAlpha = 1;
+        }
+        return true;
+      }
+
+      const state = {
+        screen: "field",
+        money: 0,
+        wheat: 0,
+        wheatPile: 0,
+        stone: 0,
+        wood: 0,
+        milk: 0,
+        milkPile: 0,
+        bread: 0,
+        breadPile: 0,
+        flags: {
+          helpers: false,
+          combine: false,
+          seller1: false,
+          oven: false,
+          baker: false,
+          pen: false,
+          milkmaid: false,
+          farmer: false,
+          seller2: false,
+          helicopter: false,
+        },
+        hints: { wheat: true, kassa: false, forest: true },
+        player: { x: 0.5, y: 0.6 },
+      };
+
+      let globalTime = 0;
+      function drawHintArrow(cx, cy) {
+        const bob = Math.sin(globalTime * 4) * 6;
+        const y = cy + bob;
+        ctx.beginPath();
+        ctx.moveTo(cx - 13, y - 16);
+        ctx.lineTo(cx + 13, y - 16);
+        ctx.lineTo(cx, y + 10);
+        ctx.closePath();
+        ctx.fillStyle = "#ffde59";
+        ctx.fill();
+        ctx.strokeStyle = "rgba(0,0,0,.35)";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      }
+
+      function drawDirectionalArrow(fromX, fromY, toX, toY) {
+        const dx = toX - fromX,
+          dy = toY - fromY;
+        const dist = Math.hypot(dx, dy);
+        if (dist < 1) return;
+        const ux = dx / dist,
+          uy = dy / dist;
+        const bob = 55 + Math.sin(globalTime * 4) * 6;
+        const ax = fromX + ux * bob,
+          ay = fromY + uy * bob;
+        ctx.save();
+        ctx.translate(ax, ay);
+        ctx.rotate(Math.atan2(dy, dx) + Math.PI / 2);
+        ctx.beginPath();
+        ctx.moveTo(-13, 10);
+        ctx.lineTo(13, 10);
+        ctx.lineTo(0, -16);
+        ctx.closePath();
+        ctx.fillStyle = "#ffde59";
+        ctx.fill();
+        ctx.strokeStyle = "rgba(0,0,0,.35)";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      function clamp(v, a, b) {
+        return Math.max(a, Math.min(b, v));
+      }
+      function fmt(n) {
+        return Math.floor(n);
+      }
+      function inZone(p, z) {
+        return p.x >= z.x && p.x <= z.x + z.w && p.y >= z.y && p.y <= z.y + z.h;
+      }
+      function moveToward(pos, target, speed, dt) {
+        const dx = target.x - pos.x,
+          dy = target.y - pos.y;
+        const dist = Math.hypot(dx, dy);
+        if (dist < 0.015) return true;
+        const step = Math.min(dist, speed * dt);
+        pos.x += (dx / dist) * step;
+        pos.y += (dy / dist) * step;
+        return false;
+      }
+      function drawTileBg(px, py, pw, ph, color) {
+        ctx.fillStyle = color;
+        roundRect(px, py, pw, ph, 14);
+        ctx.fill();
+        ctx.strokeStyle = "rgba(0,0,0,.18)";
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+      }
+      function roundRect(x, y, w, h, r) {
+        ctx.beginPath();
+        ctx.moveTo(x + r, y);
+        ctx.arcTo(x + w, y, x + w, y + h, r);
+        ctx.arcTo(x + w, y + h, x, y + h, r);
+        ctx.arcTo(x, y + h, x, y, r);
+        ctx.arcTo(x, y, x + w, y, r);
+        ctx.closePath();
+      }
+
+      function sellWheat() {
+        if (state.wheat > 0) {
+          state.money += state.wheat * 4;
+          state.wheat = 0;
+          state.hints.kassa = false;
+        }
+        if (state.bread > 0) {
+          state.money += state.bread * 10;
+          state.bread = 0;
+          state.hints.kassa = false;
+        }
+      }
+      function sellMilk() {
+        if (state.milk > 0) {
+          state.money += state.milk * 10;
+          state.milk = 0;
+        }
+      }
+      function tryBuy(z) {
+        const cost = z.cost || {};
+        if ((cost.money || 0) > state.money) return;
+        if ((cost.stone || 0) > state.stone) return;
+        if ((cost.wood || 0) > state.wood) return;
+        state.money -= cost.money || 0;
+        state.stone -= cost.stone || 0;
+        state.wood -= cost.wood || 0;
+        z.action();
+      }
+
+      /* ---------- generic regrow grids (wheat / stone / wood — manual only) ---------- */
+      function makeGrid(cfg) {
+        cfg.cells = [];
+        for (let i = 0; i < cfg.cols * cfg.rows; i++)
+          cfg.cells.push({ grown: true, regrow: 0 });
+        return cfg;
+      }
+      function cellRect(g, i) {
+        const cw = g.area.w / g.cols,
+          ch = g.area.h / g.rows;
+        const col = i % g.cols,
+          row = Math.floor(i / g.cols);
+        return { x: g.area.x + col * cw, y: g.area.y + row * ch, w: cw, h: ch };
+      }
+      function collectCell(g, i, mode) {
+        g.cells[i].grown = false;
+        g.cells[i].regrow = g.regrowTime;
+        if (mode === "direct") state[g.directKey] += 1;
+      }
+      function updateGrid(g, dt, playerHere) {
+        for (const c of g.cells) {
+          if (!c.grown) {
+            c.regrow -= dt;
+            if (c.regrow <= 0) c.grown = true;
+          }
+        }
+        if (playerHere) {
+          for (let i = 0; i < g.cells.length; i++) {
+            if (!g.cells[i].grown) continue;
+            if (inZone(state.player, cellRect(g, i)))
+              collectCell(g, i, "direct");
+          }
+        }
+      }
+      function renderGrid(g) {
+        for (let i = 0; i < g.cells.length; i++) {
+          const r = cellRect(g, i);
+          const cx = (r.x + r.w / 2) * W,
+            cy = (r.y + r.h / 2) * H;
+          const grown = g.cells[i].grown;
+          const sprite = grown ? g.sprite : g.emptySprite || g.sprite;
+          const h = grown ? g.bigSize : g.smallSize;
+          const alpha = grown ? 1 : g.emptySprite ? 1 : 0.3;
+          drawSprite(sprite, cx, cy, h, alpha);
+        }
+      }
+
+      const wheatGrid = makeGrid({
+        cols: 5,
+        rows: 4,
+        area: { x: 0.08, y: 0.1, w: 0.84, h: 0.28 },
+        regrowTime: 1.5,
+        sprite: "wheat_ripe",
+        emptySprite: "wheat_sprout",
+        bigSize: 34,
+        smallSize: 24,
+        directKey: "wheat",
+      });
+      const stoneGrid = makeGrid({
+        cols: 4,
+        rows: 3,
+        area: { x: 0.06, y: 0.28, w: 0.4, h: 0.46 },
+        regrowTime: 3,
+        sprite: "stone",
+        bigSize: 32,
+        smallSize: 32,
+        directKey: "stone",
+      });
+      const woodGrid = makeGrid({
+        cols: 4,
+        rows: 3,
+        area: { x: 0.54, y: 0.28, w: 0.4, h: 0.46 },
+        regrowTime: 3,
+        sprite: "wood",
+        bigSize: 32,
+        smallSize: 32,
+        directKey: "wood",
+      });
+
+      /* ---------- cows: hungry -> feed with wheat -> fed -> milk -> hungry again ---------- */
+      const COW_COLS = 3,
+        COW_ROWS = 2,
+        COW_AREA = { x: 0.2, y: 0.22, w: 0.6, h: 0.32 };
+      let cowCells = [];
+      for (let i = 0; i < COW_COLS * COW_ROWS; i++)
+        cowCells.push({ fed: false, readyTimer: 0 });
+      const COW_DIGEST_TIME = 3;
+      function updateCowTimers(dt) {
+        for (const c of cowCells) {
+          if (c.fed && c.readyTimer > 0) c.readyTimer -= dt;
+        }
+      }
+      function cowCellRect(i) {
+        const cw = COW_AREA.w / COW_COLS,
+          ch = COW_AREA.h / COW_ROWS;
+        const col = i % COW_COLS,
+          row = Math.floor(i / COW_COLS);
+        return {
+          x: COW_AREA.x + col * cw,
+          y: COW_AREA.y + row * ch,
+          w: cw,
+          h: ch,
+        };
+      }
+      function renderCows() {
+        for (let i = 0; i < cowCells.length; i++) {
+          const r = cowCellRect(i);
+          const cx = (r.x + r.w / 2) * W,
+            cy = (r.y + r.h / 2) * H;
+          const c = cowCells[i];
+          const ready = c.fed && c.readyTimer <= 0;
+          drawSprite(c.fed ? "cow_fed" : "cow_hungry", cx, cy, 58);
+          if (ready) drawSprite("milk_bottle", cx + 24, cy - 28, 24);
+          else if (c.fed) drawSprite("hourglass", cx + 24, cy - 28, 22);
+        }
+      }
+
+      const KASSA1_TILE = { x: 0.56, y: 0.8, w: 0.19, h: 0.12 };
+      const KASSA2_TILE = { x: 0.56, y: 0.8, w: 0.19, h: 0.12 };
+
+      /* ---------- oven: fed wheat -> bakes bread over time ---------- */
+      const OVEN_TILE = { x: 0.06, y: 0.63, w: 0.26, h: 0.12 };
+      let oven = { wheatStock: 0, bakeTimer: 0, breadReady: 0 };
+
+      /* ---------- pickup / warehouse tiles ---------- */
+      const WHEAT_PICKUP = {
+        id: "wheatPickup",
+        type: "pickup",
+        x: 0.37,
+        y: 0.415,
+        w: 0.26,
+        h: 0.08,
+        label: "Warehouse",
+        color: "#8a5a2b",
+        sprite: "warehouse",
+        resources: [
+          { pileKey: "wheatPile", directKey: "wheat", icon: "🌾" },
+          { pileKey: "breadPile", directKey: "bread", icon: "🍞" },
+        ],
+        showIf: () => state.flags.helpers,
+      };
+      const MILK_PICKUP = {
+        id: "milkPickup",
+        type: "pickup",
+        x: 0.37,
+        y: 0.565,
+        w: 0.26,
+        h: 0.085,
+        label: "Warehouse",
+        color: "#8a5a2b",
+        sprite: "warehouse",
+        resources: [{ pileKey: "milkPile", directKey: "milk", icon: "🥛" }],
+        showIf: () => state.flags.milkmaid,
+      };
+
+      /* ---------- interactive tiles ---------- */
+      const screens = {
+        field: {
+          bg: "#8fd17a",
+          zones: [
+            WHEAT_PICKUP,
+            {
+              id: "helpers",
+              type: "buy",
+              x: 0.06,
+              y: 0.5,
+              w: 0.26,
+              h: 0.12,
+              label: "Assistant\n💰50",
+              color: "#e0993d",
+              sprite: "helper",
+              cost: { money: 50 },
+              showIf: () => !state.flags.helpers,
+              action: () => {
+                state.flags.helpers = true;
+              },
+            },
+            {
+              id: "combine",
+              type: "buy",
+              x: 0.06,
+              y: 0.5,
+              w: 0.26,
+              h: 0.12,
+              label: "Harvester\n💰150",
+              color: "#e0993d",
+              sprite: "combine",
+              cost: { money: 150 },
+              showIf: () => state.flags.helpers && !state.flags.combine,
+              action: () => {
+                state.flags.combine = true;
+              },
+            },
+            {
+              id: "seller1",
+              type: "buy",
+              x: 0.68,
+              y: 0.5,
+              w: 0.26,
+              h: 0.12,
+              label: "Seller\n💰100",
+              color: "#e0993d",
+              sprite: "seller",
+              cost: { money: 100 },
+              showIf: () => state.flags.combine && !state.flags.seller1,
+              action: () => {
+                state.flags.seller1 = true;
+              },
+            },
+            {
+              id: "oven",
+              type: "build",
+              x: 0.06,
+              y: 0.63,
+              w: 0.26,
+              h: 0.12,
+              label: "Oven\n💰80 🪨10",
+              color: "#b5652e",
+              sprite: "oven",
+              cost: { money: 80, stone: 10 },
+              showIf: () => state.flags.seller1 && !state.flags.oven,
+              action: () => {
+                state.flags.oven = true;
+              },
+            },
+            {
+              id: "baker",
+              type: "buy",
+              x: 0.37,
+              y: 0.6,
+              w: 0.26,
+              h: 0.12,
+              label: "Baker\n💰150",
+              color: "#e0993d",
+              sprite: "baker",
+              cost: { money: 150 },
+              showIf: () => state.flags.oven && !state.flags.baker,
+              action: () => {
+                state.flags.baker = true;
+              },
+            },
+            {
+              id: "pen",
+              type: "build",
+              x: 0.68,
+              y: 0.63,
+              w: 0.26,
+              h: 0.12,
+              label: "Pen\n💰60 🪵10",
+              color: "#b5652e",
+              sprite: "pen",
+              cost: { money: 60, wood: 10 },
+              showIf: () => state.flags.baker && !state.flags.pen,
+              action: () => {
+                state.flags.pen = true;
+              },
+            },
+            {
+              id: "toForest",
+              type: "nav",
+              x: 0.35,
+              y: 0.8,
+              w: 0.19,
+              h: 0.12,
+              label: "Forest",
+              color: "#3d5a73",
+              sprite: "forest",
+              showIf: () => state.flags.seller1,
+            },
+            {
+              id: "kassa1",
+              type: "sell",
+              x: 0.56,
+              y: 0.8,
+              w: 0.19,
+              h: 0.12,
+              label: "Cashier",
+              color: "#cc3f34",
+              sprite: "kassa",
+              action: sellWheat,
+            },
+            {
+              id: "toCowshed",
+              type: "nav",
+              x: 0.77,
+              y: 0.8,
+              w: 0.19,
+              h: 0.12,
+              label: "Cowshed",
+              color: "#3d5a73",
+              sprite: "barn",
+              requires: "pen",
+            },
+          ],
+        },
+        forest: {
+          bg: "#5a8f57",
+          zones: [
+            {
+              id: "toField",
+              type: "nav",
+              x: 0.38,
+              y: 0.06,
+              w: 0.24,
+              h: 0.1,
+              label: "Farm",
+              color: "#3d5a73",
+              sprite: "barn",
+            },
+          ],
+        },
+        cowshed: {
+          bg: "#c9a86a",
+          zones: [
+            MILK_PICKUP,
+            {
+              id: "farmer",
+              type: "buy",
+              x: 0.06,
+              y: 0.66,
+              w: 0.24,
+              h: 0.12,
+              label: "Farmer\n💰100",
+              color: "#e0993d",
+              sprite: "cowfeeder",
+              cost: { money: 100 },
+              showIf: () => !state.flags.farmer,
+              action: () => {
+                state.flags.farmer = true;
+              },
+            },
+            {
+              id: "milkmaid",
+              type: "buy",
+              x: 0.36,
+              y: 0.66,
+              w: 0.24,
+              h: 0.12,
+              label: "Milkmaid\n💰120",
+              color: "#e0993d",
+              sprite: "milkmaid",
+              cost: { money: 120 },
+              showIf: () => state.flags.farmer && !state.flags.milkmaid,
+              action: () => {
+                state.flags.milkmaid = true;
+              },
+            },
+            {
+              id: "seller2",
+              type: "buy",
+              x: 0.68,
+              y: 0.66,
+              w: 0.26,
+              h: 0.12,
+              label: "Seller\n💰100",
+              color: "#e0993d",
+              sprite: "seller",
+              cost: { money: 100 },
+              showIf: () => state.flags.milkmaid && !state.flags.seller2,
+              action: () => {
+                state.flags.seller2 = true;
+              },
+            },
+            {
+              id: "toField2",
+              type: "nav",
+              x: 0.35,
+              y: 0.8,
+              w: 0.19,
+              h: 0.12,
+              label: "Farm",
+              color: "#3d5a73",
+              sprite: "barn",
+            },
+            {
+              id: "kassa2",
+              type: "sell2",
+              x: 0.56,
+              y: 0.8,
+              w: 0.19,
+              h: 0.12,
+              label: "Cashier",
+              color: "#cc3f34",
+              sprite: "kassa",
+              action: sellMilk,
+            },
+            {
+              id: "helicopter",
+              type: "buy",
+              x: 0.77,
+              y: 0.8,
+              w: 0.19,
+              h: 0.12,
+              label: "\n💰300",
+              color: "#3f7a5c",
+              sprite: "helicopter",
+              cost: { money: 300 },
+              showIf: () => state.flags.seller2 && !state.flags.helicopter,
+              action: () => {
+                state.flags.helicopter = true;
+                startHeliAnim();
+              },
+            },
+          ],
+        },
+      };
+
+      const doneMarkers = {
+        field: [
+          {
+            test: () => state.flags.oven,
+            x: 0.06,
+            y: 0.63,
+            w: 0.26,
+            h: 0.12,
+            sprite: "oven",
+            color: "#b5652e",
+            label: () =>
+              "Oven" +
+              (oven.wheatStock > 0 ? " 🌾" + fmt(oven.wheatStock) : "") +
+              (oven.breadReady > 0 ? " 🍞" + fmt(oven.breadReady) : ""),
+          },
+        ],
+        cowshed: [],
+        forest: [],
+      };
+      function drawDoneMarkers() {
+        for (const m of doneMarkers[state.screen] || []) {
+          if (!m.test()) continue;
+          const px = m.x * W,
+            py = m.y * H,
+            pw = m.w * W,
+            ph = m.h * H;
+          drawTileBg(px, py, pw, ph, m.color);
+          drawSprite(m.sprite, px + pw / 2, py + ph * 0.38, ph * 0.58);
+          ctx.fillStyle = "#fff";
+          ctx.font = "700 11px system-ui, sans-serif";
+          ctx.textAlign = "center";
+          ctx.fillText(m.label(), px + pw / 2, py + ph * 0.9);
+        }
+      }
+
+      /* ---------- walking workers ---------- */
+      let fieldWorker = null,
+        farmerNPC = null,
+        milkmaidNPC = null,
+        bakerNPC = null;
+      function updateFieldWorker(dt) {
+        if (!state.flags.helpers) {
+          fieldWorker = null;
+          return;
+        }
+        if (!fieldWorker)
+          fieldWorker = { x: 0.5, y: 0.46, state: "seek", target: null };
+        const w = fieldWorker,
+          speed = state.flags.combine ? 0.5 : 0.24;
+        if (w.state === "seek") {
+          let best = -1,
+            bestD = Infinity;
+          for (let i = 0; i < wheatGrid.cells.length; i++) {
+            if (!wheatGrid.cells[i].grown) continue;
+            const r = cellRect(wheatGrid, i);
+            const cx = r.x + r.w / 2,
+              cy = r.y + r.h / 2;
+            const d = Math.hypot(cx - w.x, cy - w.y);
+            if (d < bestD) {
+              bestD = d;
+              best = i;
+            }
+          }
+          if (best >= 0) {
+            const r = cellRect(wheatGrid, best);
+            w.target = { x: r.x + r.w / 2, y: r.y + r.h / 2, idx: best };
+            w.state = "move";
+          }
+        } else if (w.state === "move") {
+          if (moveToward(w, w.target, speed, dt)) {
+            if (wheatGrid.cells[w.target.idx].grown)
+              collectCell(wheatGrid, w.target.idx, "carry");
+            w.state = "deliver";
+            w.target = {
+              x: WHEAT_PICKUP.x + WHEAT_PICKUP.w / 2,
+              y: WHEAT_PICKUP.y + WHEAT_PICKUP.h / 2,
+            };
+          }
+        } else if (w.state === "deliver") {
+          if (moveToward(w, w.target, speed, dt)) {
+            state.wheatPile += 1;
+            w.state = "seek";
+          }
+        }
+      }
+      let farmerCooldown = 0;
+      function updateFarmer(dt) {
+        if (!state.flags.farmer) {
+          farmerNPC = null;
+          farmerCooldown = 0;
+          return;
+        }
+        if (!farmerNPC)
+          farmerNPC = {
+            x: 0.5,
+            y: 0.6,
+            state: "seek",
+            target: null,
+            carrying: 0,
+          };
+        const w = farmerNPC,
+          speed = 0.26;
+        if (w.carrying <= 0) {
+          if (farmerCooldown > 0) {
+            farmerCooldown -= dt;
+            return;
+          }
+          const amt = Math.min(3, state.wheatPile);
+          if (amt >= 1) {
+            state.wheatPile -= amt;
+            w.carrying = amt;
+            farmerCooldown = 1.8;
+          } else {
+            farmerCooldown = 0.3;
+            return;
+          }
+        }
+        if (w.state === "seek") {
+          let best = -1,
+            bestD = Infinity;
+          for (let i = 0; i < cowCells.length; i++) {
+            if (cowCells[i].fed) continue;
+            const r = cowCellRect(i);
+            const cx = r.x + r.w / 2,
+              cy = r.y + r.h / 2;
+            const d = Math.hypot(cx - w.x, cy - w.y);
+            if (d < bestD) {
+              bestD = d;
+              best = i;
+            }
+          }
+          if (best >= 0) {
+            const r = cowCellRect(best);
+            w.target = { x: r.x + r.w / 2, y: r.y + r.h / 2, idx: best };
+            w.state = "move";
+          }
+        } else if (w.state === "move") {
+          if (moveToward(w, w.target, speed, dt)) {
+            if (!cowCells[w.target.idx].fed && w.carrying > 0) {
+              cowCells[w.target.idx].fed = true;
+              cowCells[w.target.idx].readyTimer = COW_DIGEST_TIME;
+              w.carrying -= 1;
+            }
+            w.state = "seek";
+          }
+        }
+      }
+      function updateMilkmaid(dt) {
+        if (!state.flags.milkmaid) {
+          milkmaidNPC = null;
+          return;
+        }
+        if (!milkmaidNPC)
+          milkmaidNPC = {
+            x: 0.5,
+            y: 0.3,
+            state: "seek",
+            target: null,
+            carrying: 0,
+          };
+        const w = milkmaidNPC,
+          speed = 0.26;
+        if (w.state === "seek") {
+          let best = -1,
+            bestD = Infinity;
+          for (let i = 0; i < cowCells.length; i++) {
+            if (!cowCells[i].fed || cowCells[i].readyTimer > 0) continue;
+            const r = cowCellRect(i);
+            const cx = r.x + r.w / 2,
+              cy = r.y + r.h / 2;
+            const d = Math.hypot(cx - w.x, cy - w.y);
+            if (d < bestD) {
+              bestD = d;
+              best = i;
+            }
+          }
+          if (best >= 0) {
+            const r = cowCellRect(best);
+            w.target = { x: r.x + r.w / 2, y: r.y + r.h / 2, idx: best };
+            w.state = "move";
+          }
+        } else if (w.state === "move") {
+          if (moveToward(w, w.target, speed, dt)) {
+            if (
+              cowCells[w.target.idx].fed &&
+              cowCells[w.target.idx].readyTimer <= 0
+            ) {
+              cowCells[w.target.idx].fed = false;
+              w.carrying = 2;
+            }
+            w.state = "deliver";
+            w.target = {
+              x: MILK_PICKUP.x + MILK_PICKUP.w / 2,
+              y: MILK_PICKUP.y + MILK_PICKUP.h / 2,
+            };
+          }
+        } else if (w.state === "deliver") {
+          if (moveToward(w, w.target, speed, dt)) {
+            state.milkPile += w.carrying;
+            w.carrying = 0;
+            w.state = "seek";
+          }
+        }
+      }
+      function updateBaker(dt) {
+        if (!state.flags.baker) {
+          bakerNPC = null;
+          return;
+        }
+        const whC = {
+          x: WHEAT_PICKUP.x + WHEAT_PICKUP.w / 2,
+          y: WHEAT_PICKUP.y + WHEAT_PICKUP.h / 2,
+        };
+        const ovC = {
+          x: OVEN_TILE.x + OVEN_TILE.w / 2,
+          y: OVEN_TILE.y + OVEN_TILE.h / 2,
+        };
+        if (!bakerNPC)
+          bakerNPC = {
+            x: whC.x,
+            y: whC.y,
+            state: "atWarehouse",
+            carryWheat: 0,
+            carryBread: 0,
+          };
+        const w = bakerNPC,
+          speed = 0.3;
+        if (w.state === "toWarehouse") {
+          if (moveToward(w, whC, speed, dt)) w.state = "atWarehouse";
+        } else if (w.state === "atWarehouse") {
+          if (w.carryBread > 0) {
+            state.breadPile += w.carryBread;
+            w.carryBread = 0;
+          }
+          const amt = Math.min(3, state.wheatPile);
+          if (amt >= 1) {
+            state.wheatPile -= amt;
+            w.carryWheat = amt;
+            w.state = "toOven";
+          } else if (w.carryBread <= 0) {
+            /* nothing to do, wait here */
+          }
+        } else if (w.state === "toOven") {
+          if (moveToward(w, ovC, speed, dt)) w.state = "atOven";
+        } else if (w.state === "atOven") {
+          oven.wheatStock = Math.min(10, oven.wheatStock + w.carryWheat);
+          w.carryWheat = 0;
+          if (oven.breadReady > 0) {
+            w.carryBread = oven.breadReady;
+            oven.breadReady = 0;
+          }
+          w.state = "toWarehouse";
+        }
+      }
+      let sellerNPC = null;
+      function updateSeller(dt) {
+        if (!state.flags.seller1) {
+          sellerNPC = null;
+          return;
+        }
+        const whC = {
+          x: WHEAT_PICKUP.x + WHEAT_PICKUP.w / 2,
+          y: WHEAT_PICKUP.y + WHEAT_PICKUP.h / 2,
+        };
+        const kaC = {
+          x: KASSA1_TILE.x + KASSA1_TILE.w / 2,
+          y: KASSA1_TILE.y + KASSA1_TILE.h / 2,
+        };
+        if (!sellerNPC)
+          sellerNPC = {
+            x: kaC.x,
+            y: kaC.y,
+            state: "atKassa",
+            carryWheat: 0,
+            carryBread: 0,
+          };
+        const w = sellerNPC,
+          speed = 0.3;
+        if (w.state === "toWarehouse") {
+          if (moveToward(w, whC, speed, dt)) w.state = "atWarehouse";
+        } else if (w.state === "atWarehouse") {
+          const amtW = Math.min(4, state.wheatPile);
+          const amtB = Math.min(2, state.breadPile);
+          if (amtW >= 1 || amtB >= 1) {
+            state.wheatPile -= amtW;
+            state.breadPile -= amtB;
+            w.carryWheat = amtW;
+            w.carryBread = amtB;
+            w.state = "toKassa";
+          }
+        } else if (w.state === "toKassa") {
+          if (moveToward(w, kaC, speed, dt)) w.state = "atKassa";
+        } else if (w.state === "atKassa") {
+          state.money += w.carryWheat * 4 + w.carryBread * 10;
+          w.carryWheat = 0;
+          w.carryBread = 0;
+          w.state = "toWarehouse";
+        }
+      }
+      let seller2NPC = null;
+      function updateSeller2(dt) {
+        if (!state.flags.seller2) {
+          seller2NPC = null;
+          return;
+        }
+        const mC = {
+          x: MILK_PICKUP.x + MILK_PICKUP.w / 2,
+          y: MILK_PICKUP.y + MILK_PICKUP.h / 2,
+        };
+        const kC = {
+          x: KASSA2_TILE.x + KASSA2_TILE.w / 2,
+          y: KASSA2_TILE.y + KASSA2_TILE.h / 2,
+        };
+        if (!seller2NPC)
+          seller2NPC = { x: kC.x, y: kC.y, state: "atKassa", carrying: 0 };
+        const w = seller2NPC,
+          speed = 0.3;
+        if (w.state === "toWarehouse") {
+          if (moveToward(w, mC, speed, dt)) w.state = "atWarehouse";
+        } else if (w.state === "atWarehouse") {
+          const amt = Math.min(4, state.milkPile);
+          if (amt >= 1) {
+            state.milkPile -= amt;
+            w.carrying = amt;
+            w.state = "toKassa";
+          }
+        } else if (w.state === "toKassa") {
+          if (moveToward(w, kC, speed, dt)) w.state = "atKassa";
+        } else if (w.state === "atKassa") {
+          state.money += w.carrying * 10;
+          w.carrying = 0;
+          w.state = "toWarehouse";
+        }
+      }
+      function renderNPC(npc, sprite, h) {
+        if (!npc) return;
+        drawSprite(sprite, npc.x * W, npc.y * H, h);
+      }
+
+      /* ---------- joystick ---------- */
+      let joyActive = false,
+        joyDX = 0,
+        joyDY = 0,
+        joyBaseRect;
+      const joyBase = document.getElementById("joyBase");
+      const joyStick = document.getElementById("joyStick");
+      function joyMove(clientX, clientY) {
+        const cx = joyBaseRect.left + joyBaseRect.width / 2;
+        const cy = joyBaseRect.top + joyBaseRect.height / 2;
+        let dx = clientX - cx,
+          dy = clientY - cy;
+        const max = 38;
+        const dist = Math.hypot(dx, dy);
+        if (dist > max) {
+          dx = (dx / dist) * max;
+          dy = (dy / dist) * max;
+        }
+        joyDX = dx / max;
+        joyDY = dy / max;
+        joyStick.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+      }
+      function joyEnd() {
+        joyActive = false;
+        joyDX = 0;
+        joyDY = 0;
+        joyStick.style.transform = "translate(-50%,-50%)";
+      }
+      joyBase.addEventListener(
+        "touchstart",
+        (e) => {
+          e.preventDefault();
+          joyActive = true;
+          joyBaseRect = joyBase.getBoundingClientRect();
+          const t = e.touches[0];
+          joyMove(t.clientX, t.clientY);
+        },
+        { passive: false },
+      );
+      window.addEventListener(
+        "touchmove",
+        (e) => {
+          if (joyActive) {
+            e.preventDefault();
+            const t = e.touches[0];
+            joyMove(t.clientX, t.clientY);
+          }
+        },
+        { passive: false },
+      );
+      window.addEventListener("touchend", joyEnd);
+      window.addEventListener("touchcancel", joyEnd);
+      joyBase.addEventListener("mousedown", (e) => {
+        joyActive = true;
+        joyBaseRect = joyBase.getBoundingClientRect();
+        joyMove(e.clientX, e.clientY);
+        const mm = (ev) => joyMove(ev.clientX, ev.clientY);
+        const mu = () => {
+          joyEnd();
+          window.removeEventListener("mousemove", mm);
+          window.removeEventListener("mouseup", mu);
+        };
+        window.addEventListener("mousemove", mm);
+        window.addEventListener("mouseup", mu);
+      });
+
+      function switchScreen(id) {
+        if (id === "toForest") {
+          state.screen = "forest";
+          state.player = { x: 0.5, y: 0.16 };
+          state.hints.forest = false;
+        } else if (id === "toCowshed") {
+          state.screen = "cowshed";
+          state.player = { x: 0.5, y: 0.5 };
+        } else if (id === "toField" || id === "toField2") {
+          state.screen = "field";
+          state.player = { x: 0.5, y: 0.7 };
+        }
+      }
+
+      /* ---------- helicopter flight animation ---------- */
+      let heliAnim = null;
+      function startHeliAnim() {
+        heliAnim = { t: 0 };
+      }
+      function renderHeli(t) {
+        const padX = 0.77,
+          padY = 0.8;
+        let hx = padX,
+          hy = padY,
+          showCrate = true,
+          crateAlpha = 1;
+        if (t < 1) {
+          const p = t / 1;
+          hx = padX;
+          hy = 0.05 + (padY - 0.05) * p;
+        } else if (t < 1.6) {
+          hx = padX;
+          hy = padY;
+          crateAlpha = 1 - (t - 1) / 0.6;
+        } else {
+          const p = Math.min(1, (t - 1.6) / 1.4);
+          hx = padX + p * 0.6;
+          hy = padY - p * 0.35;
+          showCrate = false;
+        }
+        if (showCrate && crateAlpha > 0) {
+          drawSprite("crate", padX * W, padY * H + 18, 40, crateAlpha);
+        }
+        drawSprite("helicopter", hx * W, hy * H, 62);
+      }
+
+      function update(dt) {
+        globalTime += dt;
+        if (state.wheat > 0 && state.hints.wheat) {
+          state.hints.wheat = false;
+          state.hints.kassa = true;
+        }
+        const speed = 0.3;
+        state.player.x = clamp(state.player.x + joyDX * speed * dt, 0.05, 0.95);
+        state.player.y = clamp(state.player.y + joyDY * speed * dt, 0.05, 0.95);
+
+        const scr = screens[state.screen];
+        for (const z of scr.zones) {
+          if (z.showIf && !z.showIf()) continue;
+          if (z.requires && !state.flags[z.requires]) continue;
+          if (!inZone(state.player, z)) continue;
+          if (z.type === "nav") switchScreen(z.id);
+          else if (z.type === "buy" || z.type === "build") tryBuy(z);
+          else if (z.type === "sell") z.action();
+          else if (z.type === "sell2") z.action();
+          else if (z.type === "pickup") {
+            for (const r of z.resources) {
+              if (state[r.pileKey] > 0) {
+                state[r.directKey] += state[r.pileKey];
+                state[r.pileKey] = 0;
+              }
+            }
+          }
+        }
+
+        updateGrid(wheatGrid, dt, state.screen === "field");
+        updateGrid(stoneGrid, dt, state.screen === "forest");
+        updateGrid(woodGrid, dt, state.screen === "forest");
+
+        if (state.screen === "cowshed") {
+          for (let i = 0; i < cowCells.length; i++) {
+            const r = cowCellRect(i);
+            if (!inZone(state.player, r)) continue;
+            if (!cowCells[i].fed && state.wheat >= 1) {
+              state.wheat -= 1;
+              cowCells[i].fed = true;
+              cowCells[i].readyTimer = COW_DIGEST_TIME;
+            } else if (cowCells[i].fed && cowCells[i].readyTimer <= 0) {
+              cowCells[i].fed = false;
+              state.milk += 2;
+            }
+          }
+        }
+
+        if (state.flags.oven) {
+          if (state.screen === "field" && inZone(state.player, OVEN_TILE)) {
+            if (state.wheat > 0 && oven.wheatStock < 10) {
+              const amt = Math.min(state.wheat, 2 * dt, 10 - oven.wheatStock);
+              state.wheat -= amt;
+              oven.wheatStock += amt;
+            }
+            if (oven.breadReady > 0) {
+              state.bread += oven.breadReady;
+              oven.breadReady = 0;
+            }
+          }
+          oven.bakeTimer += dt;
+          while (oven.wheatStock >= 2 && oven.bakeTimer >= 3) {
+            oven.bakeTimer -= 3;
+            oven.wheatStock -= 2;
+            oven.breadReady += 1;
+          }
+        }
+
+        updateCowTimers(dt);
+        updateFieldWorker(dt);
+        updateFarmer(dt);
+        updateMilkmaid(dt);
+        updateBaker(dt);
+        updateSeller(dt);
+        updateSeller2(dt);
+      }
+
+      function render() {
+        const scr = screens[state.screen];
+        ctx.fillStyle = scr.bg;
+        ctx.fillRect(0, 0, W, H);
+
+        if (state.screen === "field") renderGrid(wheatGrid);
+        if (state.screen === "forest") {
+          renderGrid(stoneGrid);
+          renderGrid(woodGrid);
+        }
+        if (state.screen === "cowshed") renderCows();
+
+        for (const z of scr.zones) {
+          if (z.showIf && !z.showIf()) continue;
+          if (z.requires && !state.flags[z.requires]) continue;
+          const px = z.x * W,
+            py = z.y * H,
+            pw = z.w * W,
+            ph = z.h * H;
+          drawTileBg(px, py, pw, ph, z.color);
+          ctx.fillStyle = "#fff";
+          if (z.sprite) {
+            drawSprite(z.sprite, px + pw / 2, py + ph * 0.38, ph * 0.58);
+            ctx.font = "700 11px system-ui, sans-serif";
+            ctx.textAlign = "center";
+            const parts = z.label.split("\n");
+            let sub = parts.join(" ").trim();
+            if (z.type === "pickup") {
+              for (const r of z.resources) {
+                if (state[r.pileKey] > 0)
+                  sub += " " + r.icon + fmt(state[r.pileKey]);
+              }
+            }
+            ctx.fillText(sub, px + pw / 2, py + ph * 0.9);
+          } else {
+            ctx.font = "600 12px system-ui, sans-serif";
+            ctx.textAlign = "center";
+            let labelText = z.label;
+            if (z.type === "pickup") {
+              for (const r of z.resources) {
+                if (state[r.pileKey] > 0)
+                  labelText += "\n" + r.icon + fmt(state[r.pileKey]);
+              }
+            }
+            const lines = labelText.split("\n");
+            lines.forEach((line, i) =>
+              ctx.fillText(
+                line,
+                px + pw / 2,
+                py + ph / 2 + (i - (lines.length - 1) / 2) * 15 + 5,
+              ),
+            );
+          }
+        }
+
+        drawDoneMarkers();
+
+        if (state.screen === "field") {
+          renderNPC(
+            fieldWorker,
+            state.flags.combine ? "combine" : "helper",
+            48,
+          );
+          renderNPC(bakerNPC, "baker", 52);
+          renderNPC(sellerNPC, "seller", 52);
+        }
+        if (state.screen === "cowshed") {
+          renderNPC(farmerNPC, "cowfeeder", 52);
+          renderNPC(milkmaidNPC, "milkmaid", 52);
+          renderNPC(seller2NPC, "seller", 52);
+        }
+
+        if (state.screen === "field") {
+          const ppx = state.player.x * W,
+            ppy = state.player.y * H;
+          if (state.hints.wheat)
+            drawDirectionalArrow(ppx, ppy, (0.08 + 0.84 / 2) * W, 0.24 * H);
+          if (state.hints.kassa)
+            drawDirectionalArrow(
+              ppx,
+              ppy,
+              (KASSA1_TILE.x + KASSA1_TILE.w / 2) * W,
+              (KASSA1_TILE.y + KASSA1_TILE.h / 2) * H,
+            );
+          if (state.hints.forest && state.flags.seller1)
+            drawHintArrow(0.35 * W + (0.19 * W) / 2, 0.8 * H - 8);
+        }
+
+        const px = state.player.x * W,
+          py = state.player.y * H;
+        ctx.beginPath();
+        ctx.ellipse(px, py + 22, 16, 6, 0, 0, Math.PI * 2);
+        ctx.fillStyle = "rgba(0,0,0,.25)";
+        ctx.fill();
+        drawSprite("farmer", px, py, 58);
+      }
+
+      function updateHUD() {
+        const hud = document.getElementById("hud");
+        const screenName =
+          state.screen === "field"
+            ? "📍 Farm"
+            : state.screen === "forest"
+              ? "📍 Forest"
+              : "📍 Cowshed";
+        let html = `<div class="pill">${screenName}</div><div class="pill">💰 ${fmt(state.money)}</div><div class="pill">🌾 ${fmt(state.wheat)}</div>`;
+        if (state.flags.oven)
+          html += `<div class="pill">🍞 ${fmt(state.bread)}</div>`;
+        if (state.screen === "forest" || !state.flags.oven || !state.flags.pen)
+          html += `<div class="pill">🪨 ${fmt(state.stone)}</div><div class="pill">🪵 ${fmt(state.wood)}</div>`;
+        if (state.flags.pen)
+          html += `<div class="pill">🥛 ${fmt(state.milk)}</div>`;
+        hud.innerHTML = html;
+      }
+
+      let lastTick = performance.now();
+      function loop(now) {
+        const dt = Math.min((now - lastTick) / 1000, 0.05);
+        lastTick = now;
+        if (heliAnim) {
+          heliAnim.t += dt;
+          render();
+          renderHeli(heliAnim.t);
+          updateHUD();
+          if (heliAnim.t > 3) {
+            heliAnim = null;
+            document.getElementById("complete").classList.add("show");
+          }
+        } else if (
+          !document.getElementById("complete").classList.contains("show")
+        ) {
+          update(dt);
+          render();
+          updateHUD();
+        }
+        requestAnimationFrame(loop);
+      }
+      requestAnimationFrame(loop);
+    </script>
+  </body>
+</html>
